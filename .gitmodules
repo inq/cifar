@@ -1,0 +1,3 @@
+[submodule "deps/monster"]
+	path = deps/monster
+	url = git@github.com:inq/monster.git
