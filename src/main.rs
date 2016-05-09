@@ -23,10 +23,19 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let src_tensor = try!(Tensor::new_4d(1, 3, 32, 32));
     let dst_tensor = try!(Tensor::new_4d(1, 3, 32, 32));
     let (n, c, h, w) = try!(conv.get_forward_output_dim(&src_tensor, &filter));
-    println!("{} {} {} {}", n, c, h, w);
+    let mut vals = try!(Memory::<f32>::new(10 * 10 * 10));
+    let tmp = [0.1f32; 10 * 10 * 10];
+    try!(vals.write(&tmp.to_vec()));
+    
     let mut dst = try!(Memory::<f32>::new(32 * 32 * 3));
     let src = try!(image.to_device());
-    try!(cudnn.sigmoid_forward(src_tensor, &src, dst_tensor, &mut dst));
+    try!(cudnn.conv_forward(&src_tensor,
+                            &src,
+                            &filter,
+                            &vals,
+                            &conv,
+                            &dst_tensor,
+                            &mut dst));
     let img = try!(Image::from_device(dst, 1u8, 32, 32));
 
     // write png image
