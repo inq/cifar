@@ -28,15 +28,14 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     try!(vals.write(&tmp.to_vec()));
     
     let mut dst = try!(Memory::<f32>::new(32 * 32 * 3));
-    let src = try!(image.to_device());
-    try!(cudnn.conv_forward(&src_tensor,
-                            &src,
-                            &filter,
-                            &vals,
-                            &conv,
-                            &dst_tensor,
-                            &mut dst));
-    let img = try!(Image::from_device(dst, 1u8, 32, 32));
+    let mut src = try!(image.to_device());
+    try!(cudnn.conv_forward_src(&src_tensor,
+                                &mut src,
+                                &filter,
+                                &vals,
+                                &conv,
+                                &dst_tensor));
+    let img = try!(Image::from_device(src, 1u8, 32, 32));
 
     // write png image
     img.save("images/cifar.png")
