@@ -18,24 +18,30 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     };
 
     // alloc device memory
-    let filter = try!(Filter4d::new(3, 3, 3, 3));
+    let filter = try!(Filter4d::new(3, 3, 3, 10));
     let conv = try!(Convolution2d::new(1, 1, 1, 1, 1, 1));
     let src_tensor = try!(Tensor::new_4d(1, 3, 32, 32));
-    let dst_tensor = try!(Tensor::new_4d(1, 3, 32, 32));
+    let dst_tensor = try!(Tensor::new_4d(1, 10, 32, 32));
+    let next_tensor = try!(Tensor::new_4d(1, 10, 32, 32));
     let (n, c, h, w) = try!(conv.get_forward_output_dim(&src_tensor, &filter));
-    let mut vals = try!(Memory::<f32>::new(10 * 10 * 10));
-    let tmp = [0.1f32; 10 * 10 * 10];
-    try!(vals.write(&tmp.to_vec()));
+    let mut val_conv1 = try!(Memory::<f32>::new(3 * 10 * 10));
+    let tmp = [0.1f32; 3 * 10 * 10];
+    try!(val_conv1.write(&tmp.to_vec()));
     
-    let mut dst = try!(Memory::<f32>::new(32 * 32 * 3));
+    let mut dst = try!(Memory::<f32>::new(32 * 32 * 16));
     let mut src = try!(image.to_device());
-    try!(cudnn.conv_forward_src(&src_tensor,
-                                &mut src,
-                                &filter,
-                                &vals,
-                                &conv,
-                                &dst_tensor));
-    let img = try!(Image::from_device(src, 1u8, 32, 32));
+    try!(cudnn.conv_forward(&src_tensor,
+                            &mut src,
+                            &filter,
+                            &val_conv1,
+                            &conv,
+                            &dst_tensor,
+                            &dst));
+
+    try!(cudnn.relu_forward_inplace(&dst_tensor,
+                                    &mut dst));
+    
+    let img = try!(Image::from_device(dst, 1u8, 32, 32));
 
     // write png image
     img.save("images/cifar.png")
