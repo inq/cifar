@@ -1,11 +1,12 @@
 extern crate monster;
 
+mod cifar;
+
 use monster::cudnn::{Cudnn, Tensor, Filter4d, Convolution2d, Pooling};
 use monster::cudart::{Memory};
 use monster::util::{Image};
-use monster::cifar::{Cifar};
+use cifar::{Cifar};
 use std::process::exit;
-use std::path::Path;
 use std::env;
 
 fn layer(cudnn: &Cudnn,
@@ -52,7 +53,7 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
 
     // alloc device memory
     let src = try!(image.to_device());
-    let mut params_conv1 = try!(Memory::<f32>::new(3 * 3 * 3 * 16));
+    let params_conv1 = try!(Memory::<f32>::new(3 * 3 * 3 * 16));
     let tmp = [0.1f32; 3 * 3 * 3 * 16];
     try!(params_conv1.write(&tmp.to_vec()));
     let data = try!(layer(&cudnn,
@@ -61,10 +62,26 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
                           16,
                           &params_conv1,
                           &src));
-    let img = try!(Image::from_device(data, 1u8, 32, 32));
-
+    let params_conv2 = try!(Memory::<f32>::new(3 * 3 * 16 * 20));
+    let tmp = [0.1f32; 3 * 3 * 16 * 20];
+    try!(params_conv2.write(&tmp.to_vec()));
+    let data2 = try!(layer(&cudnn,
+                           16,
+                           16,
+                           20,
+                           &params_conv2,
+                           &data));
+    let params_conv3 = try!(Memory::<f32>::new(3 * 3 * 20 * 20));
+    let tmp = [0.1f32; 3 * 3 * 20 * 20];
+    try!(params_conv3.write(&tmp.to_vec()));
+    let data3 = try!(layer(&cudnn,
+                           8,
+                           20,
+                           20,
+                           &params_conv3,
+                           &data2));
+    let img = try!(Image::from_device(data3, 1u8, 4, 4));
     
-
     // write png image
     img.save("images/cifar.png")
 }
