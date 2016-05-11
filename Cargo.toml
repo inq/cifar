@@ -5,3 +5,4 @@ authors = ["inkyu <gofiri@gmail.com>"]
 
 [dependencies]
 monster = { path = "deps/monster" }
+rand = "0.3"

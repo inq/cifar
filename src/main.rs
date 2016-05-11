@@ -1,4 +1,5 @@
 extern crate monster;
+extern crate rand;
 
 mod cifar;
 
@@ -9,6 +10,7 @@ use monster::{Nn};
 use cifar::{Cifar};
 use std::process::exit;
 use std::env;
+use rand::Rng;
 
 fn layer(cudnn: &Cudnn,
          size: i32,
@@ -52,11 +54,16 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
         _ => return Err("Could not read the image")
     };
 
+    let mut rng = rand::thread_rng();
+
     // alloc device memory
     let src = try!(image.to_device());
     let params_conv1 = try!(Memory::<f32>::new(3 * 3 * 3 * 16));
-    let tmp = [0.1f32; 3 * 3 * 3 * 16];
-    try!(params_conv1.write(&tmp.to_vec()));
+    let mut tmp = vec![0f32; 3 * 3 * 3 * 16];
+    for i in 0..tmp.len() {
+        tmp[i] = rng.gen_range(-0.1f32, 0.1f32);
+    }
+    try!(params_conv1.write(&tmp));
     let data = try!(layer(&nn.cudnn,
                           32,
                           3,
@@ -64,7 +71,10 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
                           &params_conv1,
                           &src));
     let params_conv2 = try!(Memory::<f32>::new(3 * 3 * 16 * 20));
-    let tmp = [0.1f32; 3 * 3 * 16 * 20];
+    let mut tmp = [0.1f32; 3 * 3 * 16 * 20];
+    for i in 0..tmp.len() {
+        tmp[i] = rng.gen_range(-0.1f32, 0.1f32);
+    }
     try!(params_conv2.write(&tmp.to_vec()));
     let data2 = try!(layer(&nn.cudnn,
                            16,
@@ -73,7 +83,10 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
                            &params_conv2,
                            &data));
     let params_conv3 = try!(Memory::<f32>::new(3 * 3 * 20 * 20));
-    let tmp = [0.1f32; 3 * 3 * 20 * 20];
+    let mut tmp = [0.1f32; 3 * 3 * 20 * 20];
+    for i in 0..tmp.len() {
+        tmp[i] = rng.gen_range(-0.1f32, 0.1f32);
+    }
     try!(params_conv3.write(&tmp.to_vec()));
     let data3 = try!(layer(&nn.cudnn,
                            8,
@@ -82,14 +95,15 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
                            &params_conv3,
                            &data2));
     let params_fcn = try!(Memory::<f32>::new(4 * 4 * 20 * 10));
-    let tmp = [0.1f32; 4 * 4 * 20 * 10];
-    try!(params_fcn.write(&tmp.to_vec()));
+    let mut tmp = vec![0.0f32; 4 * 4 * 20 * 10];
+    for i in 0..tmp.len() {
+        tmp[i] = rng.gen_range(-0.1f32, 0.1f32);
+    }
+    try!(params_fcn.write(&tmp));
     let mut data4 = try!(Memory::<f32>::new(10));
     try!(nn.fcn_forward(4 * 4 * 20, 10, &data3, &mut data4, &params_fcn));
-
     let mut tmp = vec![0f32; 10];
-    try!(params_fcn.read(&mut tmp));
-
+    try!(data4.read(&mut tmp));
     println!("{:?}", tmp);
     
     Ok(())
