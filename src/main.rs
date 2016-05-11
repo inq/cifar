@@ -5,6 +5,7 @@ mod cifar;
 use monster::cudnn::{Cudnn, Tensor, Filter4d, Convolution2d, Pooling};
 use monster::cudart::{Memory};
 use monster::util::{Image};
+use monster::{Nn};
 use cifar::{Cifar};
 use std::process::exit;
 use std::env;
@@ -43,7 +44,7 @@ fn layer(cudnn: &Cudnn,
 }
 
 fn run(args: Vec<String>) -> Result<(), &'static str> {
-    let cudnn = try!(Cudnn::new());
+    let nn = try!(Nn::new());
 
     let cifar = try!(Cifar::new(&args[1]));
     let image = match cifar.images.iter().nth(9999) {
@@ -56,7 +57,7 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let params_conv1 = try!(Memory::<f32>::new(3 * 3 * 3 * 16));
     let tmp = [0.1f32; 3 * 3 * 3 * 16];
     try!(params_conv1.write(&tmp.to_vec()));
-    let data = try!(layer(&cudnn,
+    let data = try!(layer(&nn.cudnn,
                           32,
                           3,
                           16,
@@ -65,7 +66,7 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let params_conv2 = try!(Memory::<f32>::new(3 * 3 * 16 * 20));
     let tmp = [0.1f32; 3 * 3 * 16 * 20];
     try!(params_conv2.write(&tmp.to_vec()));
-    let data2 = try!(layer(&cudnn,
+    let data2 = try!(layer(&nn.cudnn,
                            16,
                            16,
                            20,
@@ -74,16 +75,24 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let params_conv3 = try!(Memory::<f32>::new(3 * 3 * 20 * 20));
     let tmp = [0.1f32; 3 * 3 * 20 * 20];
     try!(params_conv3.write(&tmp.to_vec()));
-    let data3 = try!(layer(&cudnn,
+    let data3 = try!(layer(&nn.cudnn,
                            8,
                            20,
                            20,
                            &params_conv3,
                            &data2));
-    let img = try!(Image::from_device(data3, 1u8, 4, 4));
+    let params_fcn = try!(Memory::<f32>::new(4 * 4 * 20 * 10));
+    let tmp = [0.1f32; 4 * 4 * 20 * 10];
+    try!(params_fcn.write(&tmp.to_vec()));
+    let mut data4 = try!(Memory::<f32>::new(10));
+    try!(nn.fcn_forward(4 * 4 * 20, 10, &data3, &mut data4, &params_fcn));
+
+    let mut tmp = vec![0f32; 10];
+    try!(params_fcn.read(&mut tmp));
+
+    println!("{:?}", tmp);
     
-    // write png image
-    img.save("images/cifar.png")
+    Ok(())
 }
 
 fn main() {
