@@ -105,6 +105,15 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let mut tmp = vec![0f32; 10];
     try!(data4.read(&mut tmp));
     println!("{:?}", tmp);
+
+    // Softmax
+    let mut data4_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
+    let mut data5_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
+    let mut data5 = try!(Memory::<f32>::new(10));
+    try!(nn.cudnn.softmax_forward(&data4_tensor, &data4, &data5_tensor, &data5));
+    let mut tmp = vec![0f32; 10];
+    try!(data5.read(&mut tmp));
+    println!("{:?}", tmp);
     
     Ok(())
 }
