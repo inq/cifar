@@ -1,6 +1,6 @@
 extern crate monster;
 
-use monster::cudnn::{Cudnn, Tensor, Filter4d, Convolution2d};
+use monster::cudnn::{Cudnn, Tensor, Filter4d, Convolution2d, Pooling};
 use monster::cudart::{Memory};
 use monster::util::{Image};
 use monster::cifar::{Cifar};
@@ -28,7 +28,7 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let tmp = [0.1f32; 3 * 10 * 10];
     try!(val_conv1.write(&tmp.to_vec()));
     
-    let mut dst = try!(Memory::<f32>::new(32 * 32 * 16));
+    let mut dst = try!(Memory::<f32>::new(32 * 32 * 10));
     let mut src = try!(image.to_device());
     try!(cudnn.conv_forward(&src_tensor,
                             &mut src,
@@ -37,11 +37,21 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
                             &conv,
                             &dst_tensor,
                             &dst));
-
     try!(cudnn.relu_forward_inplace(&dst_tensor,
                                     &mut dst));
-    
-    let img = try!(Image::from_device(dst, 1u8, 32, 32));
+    let pool = try!(Pooling::new_2d_max(2, 0, 2));
+    let pool_tensor = try!(Tensor::new_4d(1, 10, 16, 16));
+    let pool_mem = try!(Memory::<f32>::new(16 * 16 * 10));
+    println!("2");
+    let (n, c, h, w) = try!(pool.output_dim(&dst_tensor));
+    println!("{} {} {} {}", n, c, h, w);
+    try!(cudnn.max_pooling_forward(&pool,
+                                   &dst_tensor,
+                                   &dst,
+                                   &pool_tensor,
+                                   &pool_mem));
+    println!("3");
+    let img = try!(Image::from_device(pool_mem, 1u8, 16, 16));
 
     // write png image
     img.save("images/cifar.png")
