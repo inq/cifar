@@ -8,6 +8,39 @@ use std::process::exit;
 use std::path::Path;
 use std::env;
 
+fn layer(cudnn: &Cudnn,
+         size: i32,
+         chan_src: i32,
+         chan_dst: i32,
+         params: &Memory<f32>, 
+         ipt: &Memory<f32>)
+         -> Result<Memory<f32>, &'static str> {
+    let filter = try!(Filter4d::new(chan_dst, chan_src, 3, 3));
+    let conv = try!(Convolution2d::new(1, 1, 1, 1, 1, 1));
+    let src_tensor = try!(Tensor::new_4d(1, chan_src, size, size));
+    let dst_tensor = try!(Tensor::new_4d(1, chan_dst, size, size));
+    let pool_tensor = try!(Tensor::new_4d(1, chan_dst, size / 2, size / 2));
+    let mut mem = try!(Memory::<f32>::new((chan_dst * size * size) as usize));
+    let res = try!(Memory::<f32>::new((chan_dst * size * size / 4) as usize));
+    let pool = try!(Pooling::new_2d_max(2, 0, 2));
+
+    try!(cudnn.conv_forward(&src_tensor,
+                            &ipt,
+                            &filter,
+                            &params,
+                            &conv,
+                            &dst_tensor,
+                            &mem));
+    try!(cudnn.relu_forward_inplace(&dst_tensor,
+                                    &mut mem));
+    try!(cudnn.max_pooling_forward(&pool,
+                                   &dst_tensor,
+                                   &mem,
+                                   &pool_tensor,
+                                   &res));
+    Ok(res)
+}
+
 fn run(args: Vec<String>) -> Result<(), &'static str> {
     let cudnn = try!(Cudnn::new());
 
@@ -18,40 +51,19 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     };
 
     // alloc device memory
-    let filter = try!(Filter4d::new(3, 3, 3, 10));
-    let conv = try!(Convolution2d::new(1, 1, 1, 1, 1, 1));
-    let src_tensor = try!(Tensor::new_4d(1, 3, 32, 32));
-    let dst_tensor = try!(Tensor::new_4d(1, 10, 32, 32));
-    let next_tensor = try!(Tensor::new_4d(1, 10, 32, 32));
-    let (n, c, h, w) = try!(conv.get_forward_output_dim(&src_tensor, &filter));
-    let mut val_conv1 = try!(Memory::<f32>::new(3 * 10 * 10));
-    let tmp = [0.1f32; 3 * 10 * 10];
-    try!(val_conv1.write(&tmp.to_vec()));
+    let src = try!(image.to_device());
+    let mut params_conv1 = try!(Memory::<f32>::new(3 * 3 * 3 * 16));
+    let tmp = [0.1f32; 3 * 3 * 3 * 16];
+    try!(params_conv1.write(&tmp.to_vec()));
+    let data = try!(layer(&cudnn,
+                          32,
+                          3,
+                          16,
+                          &params_conv1,
+                          &src));
+    let img = try!(Image::from_device(data, 1u8, 32, 32));
+
     
-    let mut dst = try!(Memory::<f32>::new(32 * 32 * 10));
-    let mut src = try!(image.to_device());
-    try!(cudnn.conv_forward(&src_tensor,
-                            &mut src,
-                            &filter,
-                            &val_conv1,
-                            &conv,
-                            &dst_tensor,
-                            &dst));
-    try!(cudnn.relu_forward_inplace(&dst_tensor,
-                                    &mut dst));
-    let pool = try!(Pooling::new_2d_max(2, 0, 2));
-    let pool_tensor = try!(Tensor::new_4d(1, 10, 16, 16));
-    let pool_mem = try!(Memory::<f32>::new(16 * 16 * 10));
-    println!("2");
-    let (n, c, h, w) = try!(pool.output_dim(&dst_tensor));
-    println!("{} {} {} {}", n, c, h, w);
-    try!(cudnn.max_pooling_forward(&pool,
-                                   &dst_tensor,
-                                   &dst,
-                                   &pool_tensor,
-                                   &pool_mem));
-    println!("3");
-    let img = try!(Image::from_device(pool_mem, 1u8, 16, 16));
 
     // write png image
     img.save("images/cifar.png")
