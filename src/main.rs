@@ -146,6 +146,27 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     // Loss Function - CrossEntropy
     let mut loss = - tmp[image.info as usize].ln();
     println!("loss: {}", loss);
+
+    // Back Propagation!
+    let mut dy_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
+    let mut target = vec![0f32; 10];
+    target[image.info as usize] = 1f32;
+    let mut dy = try!(Memory::<f32>::new(10));
+    try!(dy.write(&target));
+    for i in 0..target.len() { target[i] = target[i] - tmp[i] };
+    println!("dy: {:?}", target);
+
+    let mut dx_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
+    let mut dx = try!(Memory::<f32>::new(10));
+    try!(nn.cudnn.softmax_backward(&data5_tensor,
+                                   &data5,
+                                   &dy_tensor,
+                                   &dy,
+                                   &mut dx_tensor,
+                                   &dx));
+    let mut tmp = vec![0f32; 10];
+    dx.read(&mut tmp);
+    println!("dx: {:?}", tmp);
     
     Ok(())
 }
