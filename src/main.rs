@@ -170,19 +170,25 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
         let mut tmp = vec![0f32; 10];
         dx.read(&mut tmp);
 
+        let mut dy_tensor = dx_tensor;
+        let mut dy = dx;
+        let mut dx = try!(Memory::<f32>::new(4 * 4 * 20));
+
         // FCN
         try!(nn.cudnn.bias_backward(scale,
                                     &mut bias_tensor,
                                     &bias_fcn,
-                                    &dx_tensor,
-                                    &dx));
+                                    &dy_tensor,
+                                    &dy));
 
         try!(nn.fcn_backward(scale,
                              4 * 4 * 20,
                              10,
                              &data3,
-                             &dx,
+                             &dy,
+                             &mut dx,
                              &mut params_fcn));
+
         
 
     }
