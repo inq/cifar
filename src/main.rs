@@ -3,7 +3,7 @@ extern crate rand;
 
 mod cifar;
 
-use monster::cudnn::{Cudnn, Tensor, Filter4d, Convolution2d, Pooling};
+use monster::cudnn::{Cudnn, Tensor, Pooling};
 use monster::cudart::{Memory};
 use monster::util::{Image};
 use monster::{Nn};
@@ -12,43 +12,37 @@ use std::process::exit;
 use std::env;
 use rand::Rng;
 
-fn layer(cudnn: &Cudnn,
+struct LayerData {
+    after_conv: Tensor,
+    after_relu: Tensor,
+    after_pool: Tensor
+}
+
+struct LayerParam {
+    conv: Tensor,
+    bias: Tensor
+}
+
+fn layer(nn: &Nn,
+         ipt: &Tensor,
          size: i32,
          chan_src: i32,
          chan_dst: i32,
-         params: &Memory<f32>,
-         bias: &Memory<f32>,
-         ipt: &Memory<f32>)
-         -> Result<Memory<f32>, &'static str> {
-    let filter = try!(Filter4d::new(chan_dst, chan_src, 3, 3));
-    let conv = try!(Convolution2d::new(1, 1, 1, 1, 1, 1));
-    let src_tensor = try!(Tensor::new_4d(1, chan_src, size, size));
-    let dst_tensor = try!(Tensor::new_4d(1, chan_dst, size, size));
-    let bias_tensor = try!(Tensor::new_4d(1, chan_dst, 1, 1));
-    let pool_tensor = try!(Tensor::new_4d(1, chan_dst, size / 2, size / 2));
-    let mut mem = try!(Memory::<f32>::new((chan_dst * size * size) as usize));
-    let res = try!(Memory::<f32>::new((chan_dst * size * size / 4) as usize));
-    let pool = try!(Pooling::new_2d_max(2, 0, 2));
-
-    try!(cudnn.conv_forward(&src_tensor,
-                            &ipt,
-                            &filter,
-                            &params,
-                            &conv,
-                            &dst_tensor,
-                            &mem));
-    try!(cudnn.add_bias(&bias_tensor,
-                        &bias,
-                        &dst_tensor,
-                        &mem));
-    try!(cudnn.relu_forward_inplace(&dst_tensor,
-                                    &mut mem));
-    try!(cudnn.max_pooling_forward(&pool,
-                                   &dst_tensor,
-                                   &mem,
-                                   &pool_tensor,
-                                   &res));
-    Ok(res)
+         params: &LayerParam)
+         -> Result<LayerData, &'static str> {
+    let filter = try!(Nn::new_filter(chan_dst, chan_src, 3, 3));
+    let conv = try!(Nn::new_conv(1, 1, 1));
+    let pool = try!(Nn::new_max_pooling(2, 0, 2));
+    let data = LayerData {
+        after_conv: try!(Tensor::new(1, chan_dst, size, size)),
+        after_relu: try!(Tensor::new(1, chan_dst, size, size)),
+        after_pool: try!(Tensor::new(1, chan_dst, size / 2, size / 2))
+    };
+    try!(nn.conv_forward(ipt, &filter, &params.conv, &conv, &data.after_conv));
+    try!(nn.bias_forward(&data.after_conv, &params.bias));
+    try!(nn.relu_forward(&data.after_conv, &data.after_relu));
+    try!(nn.pooling_forward(&pool, &data.after_relu, &data.after_pool));
+    Ok(data)
 }
 
 fn run(args: Vec<String>) -> Result<(), &'static str> {
@@ -63,84 +57,80 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
     let mut rng = rand::thread_rng();
 
     // Initialize parameters
-    let params_conv1 = try!(Memory::<f32>::new(3 * 3 * 3 * 16));
+    let layers = [
+        LayerParam {
+            conv: try!(Tensor::new(1, 3 * 16, 3, 3)),
+            bias: try!(Tensor::new(1, 16, 1, 1))
+        },
+        LayerParam {
+            conv: try!(Tensor::new(1, 16 * 20, 3, 3)),
+            bias: try!(Tensor::new(1, 20, 1, 1))
+        },
+        LayerParam {
+            conv: try!(Tensor::new(1, 20 * 20, 3, 3)),
+            bias: try!(Tensor::new(1, 20, 1, 1))
+        }
+    ];
     let mut tmp = vec![0f32; 3 * 3 * 3 * 16];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32); }
-    try!(params_conv1.write(&tmp));
-    let bias_conv1 = try!(Memory::<f32>::new(16));
+    try!(layers[0].conv.write(&tmp));
     let mut tmp = vec![0f32; 16];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32); }
-    try!(bias_conv1.write(&tmp));
+    try!(layers[0].bias.write(&tmp));
 
-    let params_conv2 = try!(Memory::<f32>::new(3 * 3 * 16 * 20));
     let mut tmp = [0.1f32; 3 * 3 * 16 * 20];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32) };
-    try!(params_conv2.write(&tmp.to_vec()));
-    let bias_conv2 = try!(Memory::<f32>::new(20));
+    try!(layers[1].conv.write(&tmp.to_vec()));
     let mut tmp = vec![0f32; 20];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32); }
-    try!(bias_conv2.write(&tmp));
+    try!(layers[1].bias.write(&tmp));
 
-    let params_conv3 = try!(Memory::<f32>::new(3 * 3 * 20 * 20));
     let mut tmp = [0.1f32; 3 * 3 * 20 * 20];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32) };
-    try!(params_conv3.write(&tmp.to_vec()));
-    let bias_conv3 = try!(Memory::<f32>::new(20));
+    try!(layers[2].conv.write(&tmp.to_vec()));
     let mut tmp = vec![0f32; 20];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32); }
-    try!(bias_conv3.write(&tmp));
+    try!(layers[2].bias.write(&tmp));
 
-    let mut params_fcn = try!(Memory::<f32>::new(4 * 4 * 20 * 10));
+    let params_fcn = try!(Tensor::new(1, 4 * 4 * 20 * 10, 1, 1));
     let mut tmp = vec![0.0f32; 4 * 4 * 20 * 10];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32) };
     try!(params_fcn.write(&tmp));
-    let bias_fcn = try!(Memory::<f32>::new(10));
+    let bias_fcn = try!(Tensor::new(1, 10, 1, 1));
     let mut tmp = vec![0f32; 10];
     for i in 0..tmp.len() { tmp[i] = rng.gen_range(-0.1f32, 0.1f32); }
     try!(bias_fcn.write(&tmp));
-
     // alloc device memory
     for i in 0..10 {
         let src = try!(image.to_device());
-        let data = try!(layer(&nn.cudnn,
+        let data = try!(layer(&nn,
+                              &src,
                               32,
                               3,
                               16,
-                              &params_conv1,
-                              &bias_conv1,
-                              &src));
-
-        let data2 = try!(layer(&nn.cudnn,
+                              &layers[0]));
+        let data2 = try!(layer(&nn,
+                               &data.after_pool,
                                16,
                                16,
                                20,
-                               &params_conv2,
-                               &bias_conv2,
-                               &data));
-
-        let data3 = try!(layer(&nn.cudnn,
+                               &layers[1]));
+        let data3 = try!(layer(&nn,
+                               &data2.after_pool,
                                8,
                                20,
                                20,
-                               &params_conv3,
-                               &bias_conv3,
-                               &data2));
+                               &layers[2]));
         // FCN
-        let mut data4_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
-        let mut bias_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
-        let mut data4 = try!(Memory::<f32>::new(10));
-        try!(nn.fcn_forward(4 * 4 * 20, 10, &data3, &mut data4, &params_fcn));
+        let mut data4 = try!(Tensor::new(1, 10, 1, 1));
+        try!(nn.fcn_forward(&data3.after_pool, &data4, &params_fcn));
         let mut tmp = vec![0f32; 10];
         try!(data4.read(&mut tmp));
-        try!(nn.cudnn.add_bias(&bias_tensor,
-                               &bias_fcn,
-                               &data4_tensor,
-                               &data4));
+        try!(nn.bias_forward(&data4,
+                             &bias_fcn));
         // Softmax
-
-        let mut data5_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
-        let mut data5 = try!(Memory::<f32>::new(10));
-        try!(nn.cudnn.softmax_forward(&data4_tensor, &data4, &data5_tensor, &data5));
+        let mut data5 = try!(Tensor::new(1, 10, 1, 1));
+        try!(nn.softmax_forward(&data4, &data5));
         let mut tmp = vec![0f32; 10];
         try!(data5.read(&mut tmp));
 
@@ -151,48 +141,34 @@ fn run(args: Vec<String>) -> Result<(), &'static str> {
         // Back Propagation!
         let scale = 0.01f32;
 
-        let mut dy_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
+        let mut dy = try!(Tensor::new(1, 10, 1, 1));
         let mut target = vec![0f32; 10];
         target[image.info as usize] = 1f32;
-        let mut dy = try!(Memory::<f32>::new(10));
         try!(dy.write(&target));
         for i in 0..target.len() { target[i] = target[i] - tmp[i] };
 
         // Softmax
-        let mut dx_tensor = try!(Tensor::new_4d(1, 10, 1, 1));
-        let mut dx = try!(Memory::<f32>::new(10));
-        try!(nn.cudnn.softmax_backward(&data5_tensor,
-                                       &data5,
-                                       &dy_tensor,
-                                       &dy,
-                                       &mut dx_tensor,
-                                       &dx));
+        let mut dx = try!(Tensor::new(1, 10, 1, 1));
+        try!(nn.softmax_backward(&data5,
+                                 &dy,
+                                 &dx));
         let mut tmp = vec![0f32; 10];
         dx.read(&mut tmp);
 
-        let mut dy_tensor = dx_tensor;
         let mut dy = dx;
-        let mut dx = try!(Memory::<f32>::new(4 * 4 * 20));
+        let mut dx = try!(Tensor::new(1, 20, 4, 4));
 
         // FCN
-        try!(nn.cudnn.bias_backward(scale,
-                                    &mut bias_tensor,
-                                    &bias_fcn,
-                                    &dy_tensor,
-                                    &dy));
+        try!(nn.bias_backward(scale,
+                              &bias_fcn,
+                              &dy));
 
         try!(nn.fcn_backward(scale,
-                             4 * 4 * 20,
-                             10,
-                             &data3,
+                             &data3.after_pool,
                              &dy,
-                             &mut dx,
-                             &mut params_fcn));
-
-        
-
-    }
-    
+                             &dx,
+                             &params_fcn));
+    }    
     Ok(())
 }
 
